@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!doctype html>
 <html lang="en">
 <head>
@@ -171,7 +170,7 @@ html, body { overscroll-behavior: none; }
 </div>
 <div id="drv" hidden>
   <div id="tags"></div><canvas id="mm" width="200" height="200" style="position:absolute;top:calc(8px + env(safe-area-inset-top,0px));left:10px;width:112px;height:112px;border-radius:12px;background:rgba(10,14,20,.55);border:1px solid var(--line)"></canvas><div id="tower" hidden></div><div id="cd"></div><div id="res" hidden></div>
-  <div id="spd"><b id="dk">0</b><span>km/h</span><i id="dg">D</i><div id="dbar"><u id="dbu"></u></div><p id="dlap">Cross the start line for lap times</p><label style="display:block;font:600 11px var(--display);letter-spacing:.1em;color:var(--mut);pointer-events:auto">STEER <input id="sens" type="range" min="0.5" max="2.5" step="0.05" value="1.2" style="width:90px;vertical-align:middle;accent-color:var(--accent)"></label></div>
+  <div id="spd"><b id="dk">0</b><span>km/h</span><i id="dg">D</i><div id="dbar"><u id="dbu"></u></div><p id="dlap">Cross the start line for lap times</p><label style="display:block;font:600 11px var(--display);letter-spacing:.1em;color:var(--mut);pointer-events:auto">GREEN SPEED <input id="gnspd" type="range" min="0.1" max="1" step="0.05" value="0.8" style="width:90px;vertical-align:middle;accent-color:var(--accent)"></label><label style="display:block;font:600 11px var(--display);letter-spacing:.1em;color:var(--mut);pointer-events:auto">GRAVEL SPEED <input id="gspd" type="range" min="0.1" max="1" step="0.05" value="0.4" style="width:90px;vertical-align:middle;accent-color:var(--accent)"></label><label style="display:block;font:600 11px var(--display);letter-spacing:.1em;color:var(--mut);pointer-events:auto">STEER <input id="sens" type="range" min="0.5" max="2.5" step="0.05" value="1.2" style="width:90px;vertical-align:middle;accent-color:var(--accent)"></label></div>
   <button id="fanBtn" aria-label="Menu">&#9776;</button>
   <div id="fan">
     <button data-f="lights" id="fLights">&#128161;<small>Lights</small></button>
@@ -938,6 +937,17 @@ function gridQuads(sLine, pole) {
       while (Math.abs(L.KW[L.wrap(x)]) > 1 / (260 * TS) && x - pi < 300) x++;
       return { apex: pi * L.ds, rad: 1 / Math.abs(L.KW[pi]), out: -Math.sign(L.KW[pi]), entry: e * L.ds, exit: x * L.ds };
     }).sort(function (a, b) { return sMod(a.apex - sLine) - sMod(b.apex - sLine); });
+    var GRAV = { g: 0.4, v: 0.8 };
+    var BWT = { '-1': new Float32Array(L.M), '1': new Float32Array(L.M) };
+    (function () { for (var i = 0; i < L.M; i++) { var s0 = i * L.ds; [-1, 1].forEach(function (sd) { var w = 9;
+      corners.forEach(function (cn) { if (cn.out !== sd) return; var d = sMod(s0 - cn.apex + L.len / 2) - L.len / 2, hf = Math.max(20, sMod(cn.exit - cn.entry) / 2), t = 1 - sstep(hf * 0.5, hf + 70, Math.abs(d)), k = cn.rad < 140 * TS ? 1 : cn.rad < 400 * TS ? 0.55 : 0.2; w = Math.max(w, 9 + 34 * k * t); });
+      BWT[sd][i] = w; }); } })();
+    var GWT = { '-1': new Float32Array(L.M), '1': new Float32Array(L.M) };
+    (function () { for (var i = 0; i < L.M; i++) { var s0 = i * L.ds; [-1, 1].forEach(function (sd) { var w = 0;
+      corners.forEach(function (cn) { if (cn.rad > 300 * TS) return; var d = sMod(s0 - cn.apex + L.len / 2) - L.len / 2, hf = Math.max(20, sMod(cn.exit - cn.entry) / 2), t = 1 - sstep(hf * 0.7, hf + 25, Math.abs(d)); w = Math.max(w, (cn.out === sd ? 8 : 4.5) * t); });
+      GWT[sd][i] = w < 0.4 ? 0 : w; }); } })();
+    function GW(s, sd) { var f = sMod(s) / L.ds, i = Math.floor(f), a = GWT[sd], u = f - i; return a[i % L.M] * (1 - u) + a[(i + 1) % L.M] * u; }
+    function BW(s, sd) { var f = sMod(s) / L.ds, i = Math.floor(f), a = BWT[sd], u = f - i; return a[i % L.M] * (1 - u) + a[(i + 1) % L.M] * u; }
     corners.forEach(function (cn, n) {
       var prev = corners[(n + corners.length - 1) % corners.length], gap = sMod(cn.entry - prev.exit), lat = cn.out * (RH + RUN_W / 2);
       addDecal({ s: cn.apex, lat: lat, len: 7, w: 3.6, along: true, draw: words(['T' + (n + 1)]) });
@@ -1155,11 +1165,11 @@ function gridQuads(sLine, pole) {
       G.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); G.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); G.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
       return G;
     }
-    function gridMesh(x0, z0, nx, nz, cell, Hh, Dd, mat) {
+    function gridMesh(x0, z0, nx, nz, cell, Hh, Dd, mat, Ww) {
       var pos = new Float32Array((nx + 1) * (nz + 1) * 3), inf = new Float32Array((nx + 1) * (nz + 1) * 2), idx = new Uint32Array(nx * nz * 6), q = 0;
       for (var j = 0; j <= nz; j++) for (var i = 0; i <= nx; i++) { var v = j * (nx + 1) + i; pos[v * 3] = x0 + i * cell; pos[v * 3 + 1] = Hh[v]; pos[v * 3 + 2] = z0 + j * cell; inf[v * 2] = Dd[v]; inf[v * 2 + 1] = Hh[v]; }
       for (j = 0; j < nz; j++) for (i = 0; i < nx; i++) { var a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1; idx.set([a, c, b, b, c, d], q); q += 6; }
-      var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aInfo', new THREE.BufferAttribute(inf, 2)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+      var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aInfo', new THREE.BufferAttribute(inf, 2)); g.setAttribute('aW', new THREE.BufferAttribute(Ww, 1)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
       var m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.frustumCulled = false; return m;
     }
     function terrainMat(e) {
@@ -1168,9 +1178,9 @@ function gridQuads(sLine, pole) {
         uG0: { value: G0 }, uRockY: { value: e.rockY }, uSeaY: { value: G0 - 6 }, uHalf: { value: HALF }, uSea: { value: e.sea ? 1 : 0 }, uMownAmt: { value: e.mownAmt } };
       m.onBeforeCompile = function (sh) {
         for (var k in u) sh.uniforms[k] = u[k];
-        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aInfo; varying vec2 vInfo; varying vec3 vWP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvInfo = aInfo; vWP = position;');
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aInfo; attribute float aW; varying float vW; varying vec2 vInfo; varying vec3 vWP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = aW; vInfo = aInfo; vWP = position;');
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', [ '#include <common>',
-          'uniform vec3 uA, uB, uC, uR, uS, uGrav, uMown; uniform float uG0, uRockY, uSeaY, uHalf, uSea, uMownAmt; varying vec2 vInfo; varying vec3 vWP;',
+          'uniform vec3 uA, uB, uC, uR, uS, uGrav, uMown; uniform float uG0, uRockY, uSeaY, uHalf, uSea, uMownAmt; varying float vW; varying vec2 vInfo; varying vec3 vWP;',
           'float th(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }',
           'float tn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(th(i), th(i + vec2(1.0, 0.0)), f.x), mix(th(i + vec2(0.0, 1.0)), th(i + vec2(1.0, 1.0)), f.x), f.y); }',
           'vec3 terrainCol(vec3 wp, vec2 inf) {',
@@ -1181,9 +1191,9 @@ function gridQuads(sLine, pole) {
           '  c *= (0.78 + 0.44 * m2) * (0.88 + 0.24 * m3) * (0.9 + 0.2 * m4);',
           '  c = mix(c, uR, smoothstep(uRockY, uRockY + 90.0, hy));',
           '  if (uSea > 0.5) c = mix(uS * (0.9 + 0.2 * m3), c, smoothstep(uSeaY - uG0 + 1.5, uSeaY - uG0 + 9.0, hy));',
-          '  float gr = smoothstep(uHalf + 0.3, uHalf + 0.8, d) * (1.0 - smoothstep(uHalf + 27.0, uHalf + 30.0, d));',
+          '  float gr = smoothstep(uHalf + 0.3, uHalf + 0.8, d) * (1.0 - smoothstep(uHalf + vW - 3.0, uHalf + vW, d));',
           '  c = mix(c, uGrav * (0.7 + 0.5 * m4) * (0.9 + 0.2 * m3), gr);',
-          '  float mw = smoothstep(uHalf + 29.0, uHalf + 32.0, d) * (1.0 - smoothstep(uHalf + 44.0, uHalf + 70.0, d));',
+          '  float mw = smoothstep(uHalf + vW - 1.0, uHalf + vW + 2.0, d) * (1.0 - smoothstep(uHalf + vW + 14.0, uHalf + vW + 40.0, d));',
           '  return mix(c, uMown * (0.85 + 0.3 * m2) * (0.92 + 0.16 * m4), mw * uMownAmt);',
           '}' ].join('\n')).replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = terrainCol(vWP, vInfo);');
       };
@@ -1193,12 +1203,12 @@ function gridQuads(sLine, pole) {
 
     // trackside safety kit: Armco after the gravel, then a catch fence that leans toward the track
     function ribbonTex(draw, w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; var g = c.getContext('2d'); draw(g, w, h); var t = new THREE.CanvasTexture(c); t.wrapS = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding; t.anisotropy = aniso; return t; }
-    function ribbon(lat, h, lean, rep, mat) {
+    function ribbon(latF, h, lean, rep, mat) {
       var N = Math.round(L.len / 5), pos = [], uv = [], idx = [];
       for (var side = -1; side <= 1; side += 2) {
         var b0 = pos.length / 3;
         for (var k = 0; k <= N; k++) {
-          var s = k * 5, p0 = L.place(s, side * lat, 0), p1 = L.place(s, side * (lat - lean), 0), ye = L.place(s, side * HALF, 0)[1] - 0.15;
+          var s = k * 5, lat = latF(s, side), p0 = L.place(s, side * lat, 0), p1 = L.place(s, side * (lat - lean), 0), ye = L.place(s, side * HALF, 0)[1] - 0.15;
           pos.push(p0[0], ye, p0[2], p1[0], ye + h, p1[2]); uv.push(s / rep, 0, s / rep, 1);
           if (k < N) { var a = b0 + k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
         }
@@ -1207,6 +1217,34 @@ function gridQuads(sLine, pole) {
       var m = new THREE.Mesh(g, mat); m.castShadow = !coarse; m.frustumCulled = false; return m;
     }
     var safety = new THREE.Group(); scene.add(safety);
+    var gravTex = ribbonTex(function (g, w, h) { g.fillStyle = '#b8a37e'; g.fillRect(0, 0, w, h); for (var i = 0; i < 2600; i++) { var v = 120 + Math.random() * 90 | 0; g.fillStyle = 'rgba(' + v + ',' + (v - 14) + ',' + (v - 45) + ',0.55)'; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); } }, 256, 256);
+    gravTex.wrapT = THREE.RepeatWrapping;
+    (function () {
+      var N = Math.round(L.len / 3), C = 8, pos = [], uv = [], idx = [];
+      for (var side = -1; side <= 1; side += 2) {
+        var b0 = pos.length / 3;
+        for (var k = 0; k <= N; k++) {
+          var s = k * 3, ye = L.place(s, side * HALF, 0)[1] - 0.03, bw = BW(s, side);
+          for (var c = 0; c <= C; c++) { var lat = HALF - 0.1 + (bw + 0.1) * c / C, p = L.place(s, side * lat, 0); pos.push(p[0], ye, p[2]); uv.push(s / 10, lat / 10); }
+          if (k < N) for (c = 0; c < C; c++) { var a = b0 + k * (C + 1) + c, d = a + C + 1; idx.push(a, a + 1, d, a + 1, d + 1, d); }
+        }
+      }
+      var g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+      var m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: gravTex, roughness: 1, side: THREE.DoubleSide })); m.receiveShadow = true; m.frustumCulled = false; safety.add(m);
+      var gT = ribbonTex(function (g, w, h) { g.fillStyle = '#1f8a4c'; g.fillRect(0, 0, w, h); for (var i = 0; i < 1500; i++) { g.fillStyle = 'rgba(0,50,25,' + (Math.random() * 0.25) + ')'; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); } }, 128, 128);
+      gT.wrapT = THREE.RepeatWrapping;
+      var P2 = [], U2 = [], I2 = [];
+      for (var sd2 = -1; sd2 <= 1; sd2 += 2) {
+        var q0 = P2.length / 3;
+        for (var k2 = 0; k2 <= N; k2++) {
+          var s2 = k2 * 3, y2 = L.place(s2, sd2 * HALF, 0)[1] - 0.01, gw = GW(s2, sd2);
+          for (var c2 = 0; c2 <= 2; c2++) { var l2 = HALF - 0.1 + (gw + 0.1) * c2 / 2, p2 = L.place(s2, sd2 * l2, 0); P2.push(p2[0], y2, p2[2]); U2.push(s2 / 10, l2 / 10); }
+          if (k2 < N) for (c2 = 0; c2 < 2; c2++) { var a2 = q0 + k2 * 3 + c2, d2 = a2 + 3; I2.push(a2, a2 + 1, d2, a2 + 1, d2 + 1, d2); }
+        }
+      }
+      var g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.Float32BufferAttribute(P2, 3)); g2.setAttribute('uv', new THREE.Float32BufferAttribute(U2, 2)); g2.setIndex(I2); g2.computeVertexNormals();
+      var m2 = new THREE.Mesh(g2, new THREE.MeshStandardMaterial({ map: gT, roughness: 0.85, side: THREE.DoubleSide })); m2.receiveShadow = true; m2.frustumCulled = false; safety.add(m2);
+    })();
     var armTex = ribbonTex(function (g, w, h) {
       g.fillStyle = '#b9bec2'; g.fillRect(0, 0, w, h);
       [0.12, 0.52].forEach(function (y) { g.fillStyle = '#8f969b'; g.fillRect(0, h * y, w, h * 0.3); g.fillStyle = '#d6dadd'; g.fillRect(0, h * y, w, 3); g.fillStyle = '#7a8085'; g.fillRect(0, h * (y + 0.3) - 3, w, 3); });
@@ -1218,8 +1256,8 @@ function gridQuads(sLine, pole) {
       for (var i = -h; i < w + h; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + h, h); g.moveTo(i + h, 0); g.lineTo(i, h); g.stroke(); }
       g.fillStyle = '#4a4f55'; g.fillRect(0, 0, 6, h); g.fillRect(0, 0, w, 5);
     }, 128, 128);
-    safety.add(ribbon(HALF + 10.8 - PULL, 0.95, 0, 8, new THREE.MeshStandardMaterial({ map: armTex, roughness: 0.4, metalness: 0.55, side: THREE.DoubleSide })));
-    safety.add(ribbon(HALF + 12.2 - PULL, 5, 1.3, 4, new THREE.MeshStandardMaterial({ map: fenceTex, roughness: 0.6, metalness: 0.3, alphaTest: 0.4, side: THREE.DoubleSide })));
+    safety.add(ribbon(function (s, sd) { return HALF + BW(s, sd); }, 0.95, 0, 8, new THREE.MeshStandardMaterial({ map: armTex, roughness: 0.4, metalness: 0.55, side: THREE.DoubleSide })));
+    safety.add(ribbon(function (s, sd) { return HALF + BW(s, sd) + 1.4; }, 5, 1.3, 4, new THREE.MeshStandardMaterial({ map: fenceTex, roughness: 0.6, metalness: 0.3, alphaTest: 0.4, side: THREE.DoubleSide })));
 
     // main-straight facilities: tiered grandstand with roof, pit building, tyre walls on the outside of tight corners
     var fac = new THREE.Group(); scene.add(fac);
@@ -1250,7 +1288,7 @@ function gridQuads(sLine, pole) {
     for (i0 = 0; i0 < nCol; i0++) [0, R * 1.2 + 1].forEach(function (o) { var pp = L.place(stS0 + i0 * 24, HALF + 15 - PULL + o, 0); dm.position.set(pp[0], L.place(stS0 + i0 * 24, HALF, 0)[1] - 0.5, pp[2]); dm.updateMatrix(); cols.setMatrixAt(ci++, dm.matrix); });
     cols.castShadow = !coarse; cols.frustumCulled = false; fac.add(cols);
     strip(L.len - 380, L.len - 60, 6, [[0, -3, 0], [0, 7, 1], [11, 7.8, 1], [11, -3, 0]], HALF + 15 - PULL, -1, new THREE.MeshStandardMaterial({ map: pitTex, roughness: 0.6, metalness: 0.15, side: THREE.DoubleSide }), 40);
-    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + 9.0 - PULL + r * 0.7), h]); });
+    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + BW(s, cn.out) - 1.8 + r * 0.7), h]); });
     var tyres = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.33, 0.33, 0.32, 10), new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.95 }), Math.max(1, twp.length));
     twp.forEach(function (t, n) { var pp = L.place(t[0], t[1], 0), sg = t[1] > 0 ? 1 : -1; dm.position.set(pp[0], L.place(t[0], sg * HALF, 0)[1] - 0.15 + 0.17 + t[2] * 0.34, pp[2]); dm.updateMatrix(); tyres.setMatrixAt(n, dm.matrix); });
     tyres.castShadow = !coarse; tyres.frustumCulled = false; fac.add(tyres);
@@ -1258,7 +1296,7 @@ function gridQuads(sLine, pole) {
     function buildEnv(n) {
       var e = ENVS[n], CELL = 22, RR = HALF + 96, i, j;
       var x0 = Math.floor((minX - 700) / CELL) * CELL, z0 = Math.floor((minZ - 700) / CELL) * CELL, nx = Math.ceil((maxX - minX + 1400) / CELL), nz = Math.ceil((maxZ - minZ + 1400) / CELL), V = (nx + 1) * (nz + 1);
-      var Dd = new Float32Array(V).fill(1e9), Tye = new Float32Array(V), LoH = new Float32Array(V).fill(1e9), Lye = new Float32Array(V), Hh = new Float32Array(V);
+      var Dd = new Float32Array(V).fill(1e9), Tye = new Float32Array(V), LoH = new Float32Array(V).fill(1e9), Lye = new Float32Array(V), Bw = new Float32Array(V).fill(9), Hh = new Float32Array(V);
       var EL = new Float32Array(L.M), ER = new Float32Array(L.M);
       for (i = 0; i < L.M; i++) { EL[i] = L.place(i * L.ds, -HALF, 0)[1]; ER[i] = L.place(i * L.ds, HALF, 0)[1]; }
       for (i = 0; i < L.M; i++) {
@@ -1267,24 +1305,24 @@ function gridQuads(sLine, pole) {
         for (var gz = gz0; gz <= gz1; gz++) for (var gx = gx0; gx <= gx1; gx++) {
           var vx = x0 + gx * CELL, vz = z0 + gz * CELL, dx = vx - px, dz = vz - pz, d = Math.sqrt(dx * dx + dz * dz); if (d > RR) continue;
           var v = gz * (nx + 1) + gx, ye = (dx * -tz + dz * tx) > 0 ? ER[i] : EL[i];
-          if (d < Dd[v]) { Dd[v] = d; Tye[v] = ye; }
+          if (d < Dd[v]) { Dd[v] = d; Tye[v] = ye; Bw[v] = BWT[(dx * -tz + dz * tx) > 0 ? '1' : '-1'][i]; }
           if (d < HALF + 6 && L.H[i] < LoH[v]) { LoH[v] = L.H[i]; Lye[v] = ye; }
         }
       }
       for (j = 0; j <= nz; j++) for (i = 0; i <= nx; i++) {
         var vv = j * (nx + 1) + i, vx2 = x0 + i * CELL, vz2 = z0 + j * CELL, base = baseH(e, vx2, vz2), dd = Dd[vv], h = base;
         if (dd < RR) {
-          var ry = LoH[vv] < 1e8 ? Lye[vv] : Tye[vv], shelf = ry - 0.15 - 1.35 * (1 - sst(HALF - 1, HALF + 3, dd)), sl = Math.max(0, dd - (HALF + 16 - PULL)) * 0.55;
+          var ry = LoH[vv] < 1e8 ? Lye[vv] : Tye[vv], shelf = ry - 0.5 - 1.6 * sst(HALF + Bw[vv] + 14, HALF + Bw[vv] + 26, dd), sl = Math.max(0, dd - (HALF + Bw[vv] + 30)) * 0.55;
           var tg = base > shelf ? Math.min(base, shelf + sl) : Math.max(base, shelf - sl), w = sst(RR - 40, RR, dd); h = tg * (1 - w) + base * w;
         }
         Hh[vv] = h;
       }
       EH = { x0: x0, z0: z0, nx: nx, nz: nz, cell: CELL, H: Hh, D: Dd };
       var grp = new THREE.Group(), mat = terrainMat(e);
-      grp.add(gridMesh(x0, z0, nx, nz, CELL, Hh, Dd, mat));
+      grp.add(gridMesh(x0, z0, nx, nz, CELL, Hh, Dd, mat, Bw));
       var OC = 220, ON = 48, OH = new Float32Array((ON + 1) * (ON + 1)), OD = new Float32Array((ON + 1) * (ON + 1)).fill(999), ox = cx - OC * ON / 2, oz = cz - OC * ON / 2;
       for (j = 0; j <= ON; j++) for (i = 0; i <= ON; i++) OH[j * (ON + 1) + i] = baseH(e, ox + i * OC, oz + j * OC) - 4;
-      grp.add(gridMesh(ox, oz, ON, ON, OC, OH, OD, mat));
+      grp.add(gridMesh(ox, oz, ON, ON, OC, OH, OD, mat, new Float32Array((ON + 1) * (ON + 1)).fill(9)));
 
       function hAt(x, z) {
         var u = (x - EH.x0) / EH.cell, w = (z - EH.z0) / EH.cell, a = Math.floor(u), b = Math.floor(w); if (a < 0 || b < 0 || a >= EH.nx || b >= EH.nz) return null;
@@ -1564,7 +1602,7 @@ function gridQuads(sLine, pole) {
       var fu = u - a, fw = w - b, k = b * (EH.nx + 1) + a, H = EH.H; return (H[k] * (1 - fu) + H[k + 1] * fu) * (1 - fw) + (H[k + EH.nx + 1] * (1 - fu) + H[k + EH.nx + 2] * fu) * fw;
     }
     function latOf(x, z, k) { return (x - L.X[k]) * -L.TZ[k] + (z - L.Z[k]) * L.TX[k]; }
-    function gy(x, z, k) { var la = latOf(x, z, k); if (Math.abs(la) <= HALF) return L.yAt(k, la); var t = terr(x, z); return t === null ? L.yAt(k, la > 0 ? HALF : -HALF) : t; }
+    function gy(x, z, k) { var la = latOf(x, z, k); if (Math.abs(la) <= HALF) return L.yAt(k, la); if (Math.abs(la) <= HALF + GW(k * L.ds, la > 0 ? 1 : -1)) return L.yAt(k, la > 0 ? HALF : -HALF) - 0.01; if (Math.abs(la) <= HALF + BW(k * L.ds, la > 0 ? 1 : -1)) return L.yAt(k, la > 0 ? HALF : -HALF) - 0.03; var t = terr(x, z); return t === null ? L.yAt(k, la > 0 ? HALF : -HALF) : t; }
     function nearK(x, z, k0) { var best = 1e18, bk = k0, M = L.M; for (var d = -30; d <= 30; d++) { var k = (k0 + d + M * 4) % M, dx = x - L.X[k], dz = z - L.Z[k], q = dx * dx + dz * dz; if (q < best) { best = q; bk = k; } } return bk; }
 
     function applyLights() {
@@ -1590,16 +1628,16 @@ function gridQuads(sLine, pole) {
     function driveStep(dt, now) {
       var sv = null; if (RC && RC.lock) { sv = [inp.G, inp.B, inp.N]; inp.G = inp.B = inp.N = 0; }
       var D = DR, fx = Math.cos(D.a), fz = Math.sin(D.a), vf = D.vx * fx + D.vz * fz, lx = D.vx - fx * vf, lz = D.vz - fz * vf, k = D.k;
-      var la = latOf(D.x, D.z, k), off = Math.abs(la) > HALF - 0.5, vmax = (inp.N ? 138 : 112) * (off ? 0.4 : 1), acc = 0;
+      var la = latOf(D.x, D.z, k), off = Math.abs(la) > HALF - 0.5, gg = (Math.abs(la) < HALF + GW(k * L.ds, la > 0 ? 1 : -1) ? GRAV.v : GRAV.g), vmax = (inp.N ? 138 : 112) * (off ? gg : 1), acc = 0;
       if (inp.G) acc += (inp.N ? 32 : 20) * Math.max(0, 1 - Math.pow(Math.max(vf, 0) / vmax, 1.6));
       if (inp.B) { if (vf > 1) acc -= 44; else if (vf > -14) acc -= 10; }
-      acc -= 0.0004 * vf * Math.abs(vf) + (vf > 0 ? 0.35 : -0.35) * (Math.abs(vf) > 0.3 ? 1 : 0) + (off ? 1.3 * vf : 0);
+      acc -= 0.0004 * vf * Math.abs(vf) + (vf > 0 ? 0.35 : -0.35) * (Math.abs(vf) > 0.3 ? 1 : 0) + (off ? 1.3 * vf * Math.max(0, (1 - gg) / 0.6) : 0);
       var vf2 = vf + acc * dt; if (!inp.G && !inp.B && Math.abs(vf2) < 0.3) vf2 = 0;
-      var grip = Math.exp(-dt * (off ? 2.5 : 11)); D.vx = fx * vf2 + lx * grip; D.vz = fz * vf2 + lz * grip;
+      var grip = Math.exp(-dt * (off ? Math.max(1.5, 2.5 + (gg - 0.4) * 14) : 11)); D.vx = fx * vf2 + lx * grip; D.vz = fz * vf2 + lz * grip;
       var tgt = inp.R - inp.L; D.st += (tgt - D.st) * (1 - Math.exp(-dt * (tgt ? 14 : 16)));
       var om = D.st * D.sens * Math.min(2.4, 95 / Math.max(Math.abs(vf2), 14)) * Math.min(1, Math.abs(vf2) / 4) * (vf2 < 0 ? -1 : 1); D.a += om * dt;
       D.x += D.vx * dt; D.z += D.vz * dt; k = nearK(D.x, D.z, k); la = latOf(D.x, D.z, k);
-      var dA = D.a - Math.atan2(L.TZ[k], L.TX[k]), reach = Math.abs(Math.cos(dA)) + 2.4 * Math.abs(Math.sin(dA)), lim = HALF + 10.3 - PULL - reach;
+      var dA = D.a - Math.atan2(L.TZ[k], L.TX[k]), reach = Math.abs(Math.cos(dA)) + 2.4 * Math.abs(Math.sin(dA)), lim = HALF + BW(k * L.ds, la > 0 ? 1 : -1) - 0.5 - reach;
       if (Math.abs(la) > lim) {
         var sg = la > 0 ? 1 : -1, nx = -L.TZ[k] * sg, nz = L.TX[k] * sg, over = Math.abs(la) - lim; D.x -= nx * over; D.z -= nz * over;
         var vn = D.vx * nx + D.vz * nz;
@@ -1649,7 +1687,7 @@ function gridQuads(sLine, pole) {
       exit: stopDrive
     };
     fitems.forEach(function (b) { b.addEventListener('click', function () { fAct[b.getAttribute('data-f')](); if (b.getAttribute('data-f') !== 'lights' && b.getAttribute('data-f') !== 'cam' && b.getAttribute('data-f') !== 'sound') fan.classList.remove('open'); }); });
-    $('sens').addEventListener('input', function (e) { DR.sens = +e.target.value; }); $('fSnd').classList.add('on'); setPlayerCar(0, SWATCH[0]);
+    $('gnspd').addEventListener('input', function (e) { GRAV.v = +e.target.value; }); $('gspd').addEventListener('input', function (e) { GRAV.g = +e.target.value; }); $('sens').addEventListener('input', function (e) { DR.sens = +e.target.value; }); $('fSnd').classList.add('on'); setPlayerCar(0, SWATCH[0]);
     var KM = { ArrowLeft: 'L', a: 'L', ArrowRight: 'R', d: 'R', ArrowUp: 'G', w: 'G', ArrowDown: 'B', s: 'B', ' ': 'B', Shift: 'N' };
     window.addEventListener('keydown', function (e) { if (!drive) return; var kk = KM[e.key]; if (kk) { inp[kk] = 1; e.preventDefault(); } else if (e.key === 'l') fAct.lights(); else if (e.key === 'c') fAct.cam(); });
     window.addEventListener('keyup', function (e) { var kk = KM[e.key]; if (kk) inp[kk] = 0; });
@@ -1793,5 +1831,3 @@ function gridQuads(sLine, pole) {
 
 </body>
 </html>
-
-</body></html>
