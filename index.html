@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -185,7 +184,8 @@ html, body { overscroll-behavior: none; }
 <script>
 /* ---------- Circuit layout (pure math, no three.js) ---------- */
 var TS = 1.6;                                                  // track scale: 1 = original lap (~5 km), 1.6 = ~8 km
-var ROAD_W = 24, RUN_W = 5, RH = ROAD_W / 2, HALF = RH + RUN_W;   // 24 m wide road (change ROAD_W to taste), 5 m run-off each side
+var ROAD_W = 41, RUN_W = 2.5, RH = ROAD_W / 2, HALF = RH + RUN_W;   // 41 m wide road (was 24: widened halfway to the old fence line), 2.5 m run-off each side
+var PULL = 9.4;                                                    // how far the barriers, fence and stands were dragged in towards the road
 var NLAT = Math.round(HALF * 2) * 2;                                            // columns across the surface (0.5 m apart)
 
 function buildLayout() {
@@ -949,75 +949,147 @@ function gridQuads(sLine, pole) {
     // ---------- Procedural sky dome: gradient, sun or moon, drifting clouds, stars and Milky Way ----------
     function lin(h) { var c = new THREE.Color(h); c.r = Math.pow(c.r, 2.2); c.g = Math.pow(c.g, 2.2); c.b = Math.pow(c.b, 2.2); return c; }   // colours are written as they should look on screen
     var SKY_VS = 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+    // Physical sky: Rayleigh + Mie + ozone single scattering through a real-sized atmosphere (so blue noon, orange low sun and
+    // the pale horizon all come out of the physics), clouds on a flat layer with perspective, and a night sky with true point
+    // stars, a galactic-plane Milky Way with dust lanes, and a moon.
     var SKY_FS = [
       'precision highp float;', 'varying vec3 vDir;',
-      'uniform vec3 uTop, uMid, uHor, uSun, uSunCol, uGlowCol, uCloudLit, uCloudDark;',
-      'uniform float uGlow, uDisc, uCover, uCloudOpa, uStars, uTime;',
-      'float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }',
-      'float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-      '  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
-      'float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; } return s; }',
-      'float h3(vec3 c) { return fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }',
-      'void main() {',
-      '  vec3 d = normalize(vDir); float h = d.y, hh = max(h, 0.0);',
-      '  vec3 col = mix(uHor, uMid, smoothstep(0.0, 0.22, hh)); col = mix(col, uTop, smoothstep(0.15, 0.85, hh));',
-      '  float sd = max(dot(d, uSun), 0.0);',
-      '  col += uGlowCol * (pow(sd, 5.0) * 0.5 + pow(sd, 36.0) * 0.6) * uGlow;',
-      '  float dens = 0.0;',
-      '  if (h > 0.0) {',
-      '    vec2 cp = d.xz / (h + 0.14) * 1.6 + vec2(uTime * 0.006, uTime * 0.003);',
-      '    float n = fbm(cp), thr = 1.0 - uCover;',
-      '    dens = smoothstep(thr - 0.1, thr + 0.2, n);',
-      '    float n2 = fbm(cp + normalize(uSun.xz + 1e-4) * 0.09);',
-      '    float lit = clamp((n - n2) * 4.0 + 0.45 + 0.25 * sd, 0.0, 1.0);',
-      '    vec3 cc = mix(uCloudDark, uCloudLit, lit);',
-      '    cc += uGlowCol * pow(sd, 3.0) * 0.5 * uGlow * (1.0 - dens * 0.4);',
-      '    col = mix(col, cc, dens * smoothstep(0.0, 0.14, h) * uCloudOpa);',
+      'uniform vec3 uSun, uTrans, uLDir, uLCol, uAmb, uMoon;', 'uniform float uI, uCover, uStars, uMoonOn, uTime;',
+      'const float RE = 6360.0, RA = 6420.0, HR = 8.0, HM = 1.2, MSC = 0.075, BM = 0.021, G = 0.76, PI = 3.14159265;',
+      'const vec3 BR = vec3(0.0058, 0.0135, 0.0331), BO = vec3(0.00065, 0.001881, 0.000085);',
+      'float od(float h) { return max(0.0, 1.0 - abs(h - 25.0) / 15.0); }',
+      'vec3 atmos(vec3 d, vec3 sd) {',
+      '  float oy = RE + 0.2, b = oy * d.y, t = -b + sqrt(b * b - (oy * oy - RA * RA)), ds = t / 12.0;',
+      '  float oR = 0.0, oM = 0.0, oO = 0.0, mu = dot(d, sd), g2 = G * G; vec3 sR = vec3(0.0), sM = vec3(0.0);',
+      '  float pR = 3.0 / (16.0 * PI) * (1.0 + mu * mu);',
+      '  float pM = 3.0 / (8.0 * PI) * ((1.0 - g2) * (1.0 + mu * mu)) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * G * mu, 1.5));',
+      '  for (int i = 0; i < 12; i++) {',
+      '    float tt = (float(i) + 0.5) * ds; vec3 p = vec3(d.x * tt, oy + d.y * tt, d.z * tt);',
+      '    float pp = dot(p, p), h = sqrt(pp) - RE, dr = exp(-h / HR) * ds, dm = exp(-h / HM) * ds;',
+      '    oR += dr; oM += dm; oO += od(h) * ds;',
+      '    float bb = dot(p, sd), dc = bb * bb - (pp - RE * RE);',
+      '    if (dc > 0.0 && -bb - sqrt(dc) > 0.0) continue;',
+      '    float tl = -bb + sqrt(bb * bb - (pp - RA * RA)), dl = tl / 4.0, lR = 0.0, lM = 0.0, lO = 0.0;',
+      '    for (int j = 0; j < 4; j++) { float q = (float(j) + 0.5) * dl, hp = sqrt(pp + 2.0 * q * bb + q * q) - RE; lR += exp(-hp / HR) * dl; lM += exp(-hp / HM) * dl; lO += od(hp) * dl; }',
+      '    vec3 a = exp(-(BR * (oR + lR) + BM * 1.1 * (oM + lM) + BO * (oO + lO)));',
+      '    sR += dr * a; sM += dm * a;',
       '  }',
-      '  float ang = acos(clamp(dot(d, uSun), -1.0, 1.0));',
-      '  col = mix(col, uSunCol, smoothstep(uDisc, uDisc * 0.7, ang) * step(-0.02, h) * (1.0 - dens * 0.85));',
+      '  return uI * (sR * BR * pR + sM * BM * pM + MSC * (1.0 - exp(-BR * oR)) * pow(uTrans, vec3(0.3)));',
+      '}',
+      'float h31(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }',
+      'float n3(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(mix(h31(i), h31(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 0.0)), h31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),',
+      '             mix(mix(h31(i + vec3(0.0, 0.0, 1.0)), h31(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h31(i + vec3(0.0, 1.0, 1.0)), h31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z); }',
+      'float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * n3(p); p = p * 2.02 + vec3(7.1, 3.3, 1.7); a *= 0.5; } return s; }',
+      // stars: one jittered round point per occupied cell (never on a grid), power-law brightness, colour temperature, twinkle
+      'vec3 starLayer(vec3 d, float sc, float prob, float px) {',
+      '  vec3 p = d * sc, c = floor(p), f = fract(p) - 0.5; float r = h31(c + 11.7) / prob; if (r > 1.0) return vec3(0.0);',
+      '  vec3 off = (vec3(h31(c + 1.3), h31(c + 5.9), h31(c + 9.1)) - 0.5) * 0.6; float m = h31(c + 3.3);',
+      '  float br = 0.05 + 1.3 * pow(r, 6.0), r0 = 0.07, rad = min(0.2, max(r0, px * sc * 0.9));',
+      '  float tw = 0.88 + 0.12 * sin(uTime * (2.0 + m * 5.0) + m * 40.0);',
+      '  float k = br * tw * (r0 * r0) / (rad * rad) * smoothstep(rad, 0.0, length(f - off));',
+      '  return k * mix(vec3(1.0, 0.76, 0.52), vec3(0.62, 0.76, 1.0), m);',
+      '}',
+      'void main() {',
+      '  vec3 d = normalize(vDir); float h = d.y, px = length(fwidth(d));',
+      '  vec3 dd = normalize(vec3(d.x, max(h, 0.0) + 0.0008, d.z));',
+      '  vec3 col = atmos(dd, uSun);',
+      '  float hh = max(h, 0.0); col += vec3(0.004, 0.007, 0.016) * uStars * (1.0 + 3.0 * exp(-hh * 7.0));',
+      '  float dens = 0.0, cosS = dot(d, uSun);',
+      '  if (h > 0.0) {',
+      '    float t = 1.0 / (h + 0.06); vec3 q = vec3(d.xz * t * 0.55 + vec2(uTime * 0.012, uTime * 0.005), uTime * 0.004);',
+      '    float warp = fbm3(q * 1.7 + 3.1), n = fbm3(q + vec3(warp * 0.6)), thr = 1.0 - uCover;',
+      '    dens = smoothstep(thr - 0.06, thr + 0.22, n);',
+      '    float n2 = fbm3(q + vec3(uLDir.x, uLDir.z, 0.0) * 0.07 + vec3(warp * 0.6));',
+      '    float thick = smoothstep(thr, thr + 0.4, n), lit = clamp(0.62 - (n2 - n) * 4.5, 0.0, 1.0) * (1.0 - 0.45 * thick);',
+      '    lit += 0.5 * pow(max(dot(d, uLDir), 0.0), 8.0) * (1.0 - thick);',
+      '    vec3 cc = mix(uAmb, uLCol, clamp(lit, 0.0, 1.0));',
+      '    cc = mix(col, cc, smoothstep(0.02, 0.35, h));',
+      '    col = mix(col, cc, dens * smoothstep(0.0, 0.16, h) * 0.96);',
+      '  }',
+      '  float ang = acos(clamp(cosS, -1.0, 1.0)), disc = 0.012;',
+      '  float sd = smoothstep(disc, disc * 0.7, ang) * step(0.0, h) * (0.78 + 0.22 * sqrt(max(0.0, 1.0 - (ang / disc) * (ang / disc))));',
+      '  col += uTrans * uI * (0.55 * sd + 0.02 * pow(max(cosS, 0.0), 64.0)) * (1.0 - dens * 0.92);',
+      '  float l = dot(col, vec3(0.2126, 0.7152, 0.0722)); col = max(vec3(0.0), l + (col - l) * 1.6); col = 1.0 - exp(-0.9 * col);',
       '  if (uStars > 0.01 && h > 0.0) {',
-      '    vec3 sp = d * 240.0, cell = floor(sp); float hs = h3(cell);',
-      '    float star = step(0.9962, hs) * (0.45 + 0.55 * fract(hs * 57.0)) * smoothstep(0.36, 0.0, length(fract(sp) - 0.5));',
-      '    vec3 mw = normalize(vec3(0.62, 0.30, -0.72)); float b = dot(d, mw), band = exp(-b * b / 0.02);',
-      '    float cl = fbm(vec2(atan(d.z, d.x) * 5.0, d.y * 9.0) + 3.0), dust = fbm(vec2(atan(d.z, d.x) * 9.0, d.y * 14.0) + 11.0);',
-      '    vec3 mwc = mix(vec3(0.30, 0.30, 0.55), vec3(0.95, 0.65, 0.55), cl) * band * (0.25 + 1.1 * cl) * (1.0 - 0.7 * smoothstep(0.52, 0.75, dust));',
-      '    vec3 sp2 = d * 700.0; float fine = step(0.985 - band * 0.012, h3(floor(sp2))) * smoothstep(0.4, 0.0, length(fract(sp2) - 0.5)) * (0.4 + band);',
-      '    vec3 add = vec3(star * 1.3 + fine * 0.6) + mwc * 0.55;',
-      '    col += add * uStars * smoothstep(0.0, 0.1, h) * (1.0 - dens * 0.9);',
+      '    float vis = uStars * smoothstep(0.0, 0.12, h) * (1.0 - dens * 0.95);',
+      '    vec3 st = starLayer(d, 110.0, 0.025, px) * 1.5 + starLayer(d, 260.0, 0.03, px) + starLayer(d, 560.0, 0.05, px) * 0.6;',
+      '    vec3 n = normalize(vec3(0.5, 0.42, -0.75)), c0 = normalize(vec3(-0.6, 0.35, 0.7)); c0 = normalize(c0 - n * dot(c0, n));',
+      '    float b = dot(d, n); vec3 al = normalize(d - n * b); float cl = dot(al, c0), bulge = exp(-(1.0 - cl) * 2.2);',
+      '    float w = 0.13 * (1.0 + 0.9 * bulge), band = exp(-b * b / (2.0 * w * w)) + 0.25 * exp(-b * b / (2.0 * 0.35 * 0.35));',
+      '    float c1 = fbm3(d * 7.0), f1 = fbm3(d * 26.0), lane = smoothstep(0.5, 0.7, fbm3(d * 9.0 + 4.0)) * exp(-pow((b - 0.02) / 0.075, 2.0));',
+      '    vec3 mwc = mix(vec3(0.55, 0.64, 0.9), vec3(1.0, 0.8, 0.55), bulge) * band * (0.25 + 0.55 * bulge) * (0.35 + 0.9 * c1) * (1.0 - 0.8 * lane) * (0.7 + 0.6 * f1) * 0.2;',
+      '    float md = 1.0; if (uMoonOn > 0.5) md = 1.0 - 0.85 * smoothstep(0.55, 0.995, dot(d, uMoon));',
+      '    col += (st + mwc) * vis * md;',
+      '    if (uMoonOn > 0.5) {',
+      '      float cm = dot(d, uMoon), am = acos(clamp(cm, -1.0, 1.0)), md2 = 0.013;',
+      '      float mk = smoothstep(md2, md2 * 0.93, am), mar = smoothstep(0.42, 0.6, fbm3(d * 170.0)), cr = 0.9 + 0.2 * n3(d * 900.0);',
+      '      col = mix(col, vec3(1.0, 0.96, 0.88) * mix(0.55, 1.0, mar) * cr, mk * (1.0 - dens * 0.9));',
+      '      col += vec3(0.5, 0.6, 0.85) * (pow(max(cm, 0.0), 700.0) * 0.35 + pow(max(cm, 0.0), 40.0) * 0.05) * (1.0 - dens * 0.6);',
+      '    }',
       '  }',
       '  gl_FragColor = linearToOutputTexel(vec4(col, 1.0));',
       '}'
     ].join('\n');
-    var sU = {}; ['uTop', 'uMid', 'uHor', 'uSunCol', 'uGlowCol', 'uCloudLit', 'uCloudDark'].forEach(function (k) { sU[k] = { value: new THREE.Color() }; });
-    sU.uSun = { value: new THREE.Vector3(0, 1, 0) };
-    ['uGlow', 'uDisc', 'uCover', 'uCloudOpa', 'uStars', 'uTime'].forEach(function (k) { sU[k] = { value: 0 }; });
-    var skyMat = new THREE.ShaderMaterial({ uniforms: sU, vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthTest: false, depthWrite: false });
-    var sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 40, 20), skyMat); sky.frustumCulled = false; sky.renderOrder = -1000; scene.add(sky);
+    // same atmosphere on the CPU: gives the fog / horizon colour and the sun's colour after the air has filtered it
+    var AT = { RE: 6360, RA: 6420, BR: [0.0058, 0.0135, 0.0331], BM: 0.021, HR: 8, HM: 1.2, G: 0.76, BO: [0.00065, 0.001881, 0.000085], OY: 6360.2, MS: 0.075 };
+    function atOd(h) { return Math.max(0, 1 - Math.abs(h - 25) / 15); }
+    function atDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function atNorm(v) { var l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; }
+    function atTrans(sd) {
+      var NL = 8, bb = AT.OY * sd[1], dc = bb * bb - (AT.OY * AT.OY - AT.RE * AT.RE);
+      if (dc > 0 && -bb - Math.sqrt(dc) > 0) return [0, 0, 0];
+      var tl = -bb + Math.sqrt(bb * bb - (AT.OY * AT.OY - AT.RA * AT.RA)), dl = tl / NL, lR = 0, lM = 0, lO = 0;
+      for (var j = 0; j < NL; j++) { var q = (j + 0.5) * dl, hp = Math.sqrt(AT.OY * AT.OY + 2 * q * bb + q * q) - AT.RE; lR += Math.exp(-hp / AT.HR) * dl; lM += Math.exp(-hp / AT.HM) * dl; lO += atOd(hp) * dl; }
+      return [0, 1, 2].map(function (k) { return Math.exp(-(AT.BR[k] * lR + AT.BM * 1.1 * lM + AT.BO[k] * lO)); });
+    }
+    function atScatter(d, sd, I, T) {
+      var NV = 12, NL = 4, b = AT.OY * d[1], t = -b + Math.sqrt(b * b - (AT.OY * AT.OY - AT.RA * AT.RA)), ds = t / NV, oR = 0, oM = 0, oO = 0, sR = [0, 0, 0], sM = [0, 0, 0];
+      var mu = atDot(d, sd), g2 = AT.G * AT.G, pR = 3 / (16 * Math.PI) * (1 + mu * mu), pM = 3 / (8 * Math.PI) * ((1 - g2) * (1 + mu * mu)) / ((2 + g2) * Math.pow(1 + g2 - 2 * AT.G * mu, 1.5));
+      for (var i = 0; i < NV; i++) {
+        var tt = (i + 0.5) * ds, p = [d[0] * tt, AT.OY + d[1] * tt, d[2] * tt], pp = atDot(p, p), h = Math.sqrt(pp) - AT.RE, dr = Math.exp(-h / AT.HR) * ds, dm = Math.exp(-h / AT.HM) * ds;
+        oR += dr; oM += dm; oO += atOd(h) * ds;
+        var bb = atDot(p, sd), dc = bb * bb - (pp - AT.RE * AT.RE); if (dc > 0 && -bb - Math.sqrt(dc) > 0) continue;
+        var tl = -bb + Math.sqrt(bb * bb - (pp - AT.RA * AT.RA)), dl = tl / NL, lR = 0, lM = 0, lO = 0;
+        for (var j = 0; j < NL; j++) { var q = (j + 0.5) * dl, hp = Math.sqrt(pp + 2 * q * bb + q * q) - AT.RE; lR += Math.exp(-hp / AT.HR) * dl; lM += Math.exp(-hp / AT.HM) * dl; lO += atOd(hp) * dl; }
+        for (var k = 0; k < 3; k++) { var a = Math.exp(-(AT.BR[k] * (oR + lR) + AT.BM * 1.1 * (oM + lM) + AT.BO[k] * (oO + lO))); sR[k] += dr * a; sM[k] += dm * a; }
+      }
+      return [0, 1, 2].map(function (k) { return I * (sR[k] * AT.BR[k] * pR + sM[k] * AT.BM * pM + AT.MS * (1 - Math.exp(-AT.BR[k] * oR)) * Math.pow(T[k], 0.3)); });
+    }
+    function atTone(c) { var l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return c.map(function (v) { return 1 - Math.exp(-0.9 * Math.max(0, l + (v - l) * 1.6)); }); }
 
+    var sU = {};
+    ['uSun', 'uTrans', 'uLDir', 'uLCol', 'uAmb', 'uMoon'].forEach(function (k) { sU[k] = { value: new THREE.Vector3() }; });
+    ['uI', 'uCover', 'uStars', 'uMoonOn', 'uTime'].forEach(function (k) { sU[k] = { value: 0 }; });
+    var skyMat = new THREE.ShaderMaterial({ uniforms: sU, vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthTest: false, depthWrite: false });
+    var sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), skyMat); sky.frustumCulled = false; sky.renderOrder = -1000; scene.add(sky);
+
+    // sun = colour/strength of the real scene light, dir = where the main light comes from, I = camera exposure (a low sun is exposed
+    // down, as a camera would), sky = true sun direction when it differs from the light (night: sun is below the horizon, moon lights the scene)
     var PRESETS = [
-      { name: 'Day', sun: 0xfff2de, sunI: 2.4, dir: [-0.55, 0.55, 0.62], hs: 0xbfd4e8, hg: 0x3a3f45, hI: 0.55, fI: 0.3,
-        top: 0x2a64b8, mid: 0x6fa4dc, hor: 0xcfe2f2, discCol: 0xfffbe6, glow: 0xfff0c0, glowI: 0.35, disc: 0.02, cover: 0.5, lit: 0xffffff, dark: 0x9fb0c6, opa: 0.92, stars: 0 },
-      { name: 'Golden hour', sun: 0xffb26b, sunI: 2.3, dir: [0.85, 0.16, -0.3], hs: 0x9a93b3, hg: 0x2a2220, hI: 0.45, fI: 0.25,
-        top: 0x27407a, mid: 0xd9733a, hor: 0xffb060, discCol: 0xffe3a0, glow: 0xffa040, glowI: 1.3, disc: 0.035, cover: 0.5, lit: 0xffa14a, dark: 0x4a3050, opa: 0.95, stars: 0 },
-      { name: 'Fiery clouds', sun: 0xff9a55, sunI: 2.0, dir: [-0.6, 0.09, 0.75], hs: 0x5a6aa0, hg: 0x2a1c20, hI: 0.45, fI: 0.25,
-        top: 0x0f1a4a, mid: 0x3d4f96, hor: 0xf08a3c, discCol: 0xffd9a0, glow: 0xff8030, glowI: 1.0, disc: 0.03, cover: 0.82, lit: 0xff9a40, dark: 0x22285a, opa: 0.97, stars: 0 },
-      { name: 'City dusk', sun: 0xff7f60, sunI: 1.6, dir: [0.5, 0.05, 0.85], hs: 0x7a5a90, hg: 0x1f1620, hI: 0.45, fI: 0.22,
-        top: 0x2a2548, mid: 0x9a4a6a, hor: 0xff9a62, discCol: 0xffd0a0, glow: 0xff7040, glowI: 0.9, disc: 0.03, cover: 0.72, lit: 0xff8a70, dark: 0x2e2440, opa: 0.95, stars: 0.12 },
-      { name: 'Milky Way', sun: 0x8fb1ff, sunI: 0.55, dir: [-0.4, 0.62, 0.5], hs: 0x2a3b55, hg: 0x07090c, hI: 0.4, fI: 0.1,
-        top: 0x02040c, mid: 0x070d22, hor: 0x16213a, discCol: 0xdfe8ff, glow: 0x6f8fff, glowI: 0.25, disc: 0.018, cover: 0.22, lit: 0x2a3a5a, dark: 0x05070d, opa: 0.55, stars: 1 }
+      { name: 'Day', sun: 0xfff2de, sunI: 2.4, dir: [-0.55, 0.55, 0.62], hs: 0xbfd4e8, hg: 0x3a3f45, hI: 0.55, fI: 0.3, I: 12, cover: 0.5, stars: 0 },
+      { name: 'Golden hour', sun: 0xffb26b, sunI: 2.3, dir: [0.85, 0.16, -0.3], hs: 0x9a93b3, hg: 0x2a2220, hI: 0.45, fI: 0.25, I: 8, cover: 0.5, stars: 0 },
+      { name: 'Fiery clouds', sun: 0xff9a55, sunI: 2.0, dir: [-0.6, 0.09, 0.75], hs: 0x5a6aa0, hg: 0x2a1c20, hI: 0.45, fI: 0.25, I: 6, cover: 0.82, stars: 0 },
+      { name: 'City dusk', sun: 0xff7f60, sunI: 1.6, dir: [0.5, 0.05, 0.85], hs: 0x7a5a90, hg: 0x1f1620, hI: 0.45, fI: 0.22, I: 5, cover: 0.72, stars: 0.12 },
+      { name: 'Milky Way', sun: 0x8fb1ff, sunI: 0.55, dir: [-0.4, 0.62, 0.5], sky: [0.3, -0.4, 0.86], moon: true, hs: 0x2a3b55, hg: 0x07090c, hI: 0.4, fI: 0.1, I: 12, cover: 0.22, stars: 1 }
     ];
     var pIdx = 0;
     function applyPreset(n) {
-      var p = PRESETS[n], d = new THREE.Vector3(p.dir[0], p.dir[1], p.dir[2]).normalize();
-      scene.background = lin(p.hor); scene.fog = scene.fog || new THREE.Fog(0xffffff, 3500, 11000); scene.fog.color.copy(lin(p.hor));
+      var p = PRESETS[n], d = new THREE.Vector3(p.dir[0], p.dir[1], p.dir[2]).normalize(), sd = atNorm(p.sky || p.dir), T = atTrans(sd), i;
+      var hor = [0, 0, 0]; for (i = 0; i < 8; i++) { var az = i * Math.PI / 4, c = atScatter(atNorm([Math.cos(az), 0.03, Math.sin(az)]), sd, p.I, T); hor[0] += c[0] / 8; hor[1] += c[1] / 8; hor[2] += c[2] / 8; }
+      hor[0] += 0.02 * p.stars; hor[1] += 0.03 * p.stars; hor[2] += 0.055 * p.stars;
+      var hc = atTone(hor), fogC = new THREE.Color(hc[0], hc[1], hc[2]);
+      scene.background = fogC.clone(); scene.fog = scene.fog || new THREE.Fog(0xffffff, 3500, 11000); scene.fog.color.copy(fogC);
       sun.color.setHex(p.sun); sun.intensity = p.sunI;
       var dd = d.clone().multiplyScalar(3000);
       sun.position.set(cx + dd.x, dd.y, cz + dd.z);
       hemi.color.setHex(p.hs); hemi.groundColor.setHex(p.hg); hemi.intensity = p.hI; fill.intensity = p.fI;
-      sU.uTop.value.copy(lin(p.top)); sU.uMid.value.copy(lin(p.mid)); sU.uHor.value.copy(lin(p.hor));
-      sU.uSunCol.value.copy(lin(p.discCol)); sU.uGlowCol.value.copy(lin(p.glow)); sU.uCloudLit.value.copy(lin(p.lit)); sU.uCloudDark.value.copy(lin(p.dark));
-      sU.uSun.value.copy(d); sU.uGlow.value = p.glowI; sU.uDisc.value = p.disc; sU.uCover.value = p.cover; sU.uCloudOpa.value = p.opa; sU.uStars.value = p.stars;
+      var za = atScatter([0, 1, 0], sd, p.I, T), ex = Math.max(p.I / 12, 0.55);
+      sU.uSun.value.set(sd[0], sd[1], sd[2]); sU.uTrans.value.set(T[0], T[1], T[2]); sU.uI.value = p.I;
+      sU.uLDir.value.copy(d); sU.uMoon.value.copy(d); sU.uMoonOn.value = p.moon ? 1 : 0;
+      if (p.moon) { sU.uLCol.value.set(0.2, 0.26, 0.42); sU.uAmb.value.set(0.012, 0.02, 0.04); }
+      else { sU.uLCol.value.set(T[0] * 1.7 * ex, T[1] * 1.7 * ex, T[2] * 1.7 * ex); sU.uAmb.value.set(za[0] * 0.9 + 0.01, za[1] * 0.9 + 0.01, za[2] * 0.9 + 0.015); }
+      sU.uCover.value = p.cover; sU.uStars.value = p.stars;
       $('lightLabel').textContent = p.name;
     }
 
@@ -1075,9 +1147,9 @@ function gridQuads(sLine, pole) {
           '  c *= (0.78 + 0.44 * m2) * (0.88 + 0.24 * m3) * (0.9 + 0.2 * m4);',
           '  c = mix(c, uR, smoothstep(uRockY, uRockY + 90.0, hy));',
           '  if (uSea > 0.5) c = mix(uS * (0.9 + 0.2 * m3), c, smoothstep(uSeaY - uG0 + 1.5, uSeaY - uG0 + 9.0, hy));',
-          '  float gr = smoothstep(uHalf + 0.4, uHalf + 1.2, d) * (1.0 - smoothstep(uHalf + 9.0, uHalf + 10.5, d));',
+          '  float gr = smoothstep(uHalf + 0.3, uHalf + 0.8, d) * (1.0 - smoothstep(uHalf + 1.4, uHalf + 2.2, d));',
           '  c = mix(c, uGrav * (0.7 + 0.5 * m4) * (0.9 + 0.2 * m3), gr);',
-          '  float mw = smoothstep(uHalf + 9.0, uHalf + 10.5, d) * (1.0 - smoothstep(uHalf + 24.0, uHalf + 34.0, d));',
+          '  float mw = smoothstep(uHalf + 1.4, uHalf + 2.2, d) * (1.0 - smoothstep(uHalf + 14.0, uHalf + 24.0, d));',
           '  return mix(c, uMown * (0.85 + 0.3 * m2) * (0.92 + 0.16 * m4), mw * uMownAmt);',
           '}' ].join('\n')).replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = terrainCol(vWP, vInfo);');
       };
@@ -1112,8 +1184,8 @@ function gridQuads(sLine, pole) {
       for (var i = -h; i < w + h; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + h, h); g.moveTo(i + h, 0); g.lineTo(i, h); g.stroke(); }
       g.fillStyle = '#4a4f55'; g.fillRect(0, 0, 6, h); g.fillRect(0, 0, w, 5);
     }, 128, 128);
-    safety.add(ribbon(HALF + 10.8, 0.95, 0, 8, new THREE.MeshStandardMaterial({ map: armTex, roughness: 0.4, metalness: 0.55, side: THREE.DoubleSide })));
-    safety.add(ribbon(HALF + 12.2, 5, 1.3, 4, new THREE.MeshStandardMaterial({ map: fenceTex, roughness: 0.6, metalness: 0.3, alphaTest: 0.4, side: THREE.DoubleSide })));
+    safety.add(ribbon(HALF + 10.8 - PULL, 0.95, 0, 8, new THREE.MeshStandardMaterial({ map: armTex, roughness: 0.4, metalness: 0.55, side: THREE.DoubleSide })));
+    safety.add(ribbon(HALF + 12.2 - PULL, 5, 1.3, 4, new THREE.MeshStandardMaterial({ map: fenceTex, roughness: 0.6, metalness: 0.3, alphaTest: 0.4, side: THREE.DoubleSide })));
 
     // main-straight facilities: tiered grandstand with roof, pit building, tyre walls on the outside of tight corners
     var fac = new THREE.Group(); scene.add(fac);
@@ -1138,13 +1210,13 @@ function gridQuads(sLine, pole) {
     for (i0 = 0; i0 < R; i0++) { tier.push([i0 * 1.2, 0.45 * (i0 + 1), i0]); tier.push([(i0 + 1) * 1.2, 0.45 * (i0 + 1), i0 + 1]); }
     tier.push([R * 1.2, -3, R]);
     var stS0 = L.len - 340, stS1 = L.len - 110;
-    strip(stS0, stS1, 6, tier, HALF + 15, 1, new THREE.MeshStandardMaterial({ map: seatTex, roughness: 0.7, flatShading: true, side: THREE.DoubleSide }), 4.8);
-    strip(stS0, stS1, 6, [[-1, 10.5, 0], [R * 1.2 + 2, 12.4, 1]], HALF + 15, 1, new THREE.MeshStandardMaterial({ color: 0xaab0b6, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide }), 8);
+    strip(stS0, stS1, 6, tier, HALF + 15 - PULL, 1, new THREE.MeshStandardMaterial({ map: seatTex, roughness: 0.7, flatShading: true, side: THREE.DoubleSide }), 4.8);
+    strip(stS0, stS1, 6, [[-1, 10.5, 0], [R * 1.2 + 2, 12.4, 1]], HALF + 15 - PULL, 1, new THREE.MeshStandardMaterial({ color: 0xaab0b6, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide }), 8);
     var colG = new THREE.BoxGeometry(0.5, 12, 0.5).translate(0, 5, 0), nCol = Math.floor((stS1 - stS0) / 24) + 1, cols = new THREE.InstancedMesh(colG, new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.5, metalness: 0.6 }), nCol * 2), dm = new THREE.Object3D(), ci = 0;
-    for (i0 = 0; i0 < nCol; i0++) [0, R * 1.2 + 1].forEach(function (o) { var pp = L.place(stS0 + i0 * 24, HALF + 15 + o, 0); dm.position.set(pp[0], L.place(stS0 + i0 * 24, HALF, 0)[1] - 0.5, pp[2]); dm.updateMatrix(); cols.setMatrixAt(ci++, dm.matrix); });
+    for (i0 = 0; i0 < nCol; i0++) [0, R * 1.2 + 1].forEach(function (o) { var pp = L.place(stS0 + i0 * 24, HALF + 15 - PULL + o, 0); dm.position.set(pp[0], L.place(stS0 + i0 * 24, HALF, 0)[1] - 0.5, pp[2]); dm.updateMatrix(); cols.setMatrixAt(ci++, dm.matrix); });
     cols.castShadow = !coarse; cols.frustumCulled = false; fac.add(cols);
-    strip(L.len - 380, L.len - 60, 6, [[0, -3, 0], [0, 7, 1], [11, 7.8, 1], [11, -3, 0]], HALF + 15, -1, new THREE.MeshStandardMaterial({ map: pitTex, roughness: 0.6, metalness: 0.15, side: THREE.DoubleSide }), 40);
-    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + 8.6 + r * 0.7), h]); });
+    strip(L.len - 380, L.len - 60, 6, [[0, -3, 0], [0, 7, 1], [11, 7.8, 1], [11, -3, 0]], HALF + 15 - PULL, -1, new THREE.MeshStandardMaterial({ map: pitTex, roughness: 0.6, metalness: 0.15, side: THREE.DoubleSide }), 40);
+    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + 0.1 + r * 0.7), h]); });
     var tyres = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.33, 0.33, 0.32, 10), new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.95 }), Math.max(1, twp.length));
     twp.forEach(function (t, n) { var pp = L.place(t[0], t[1], 0), sg = t[1] > 0 ? 1 : -1; dm.position.set(pp[0], L.place(t[0], sg * HALF, 0)[1] - 0.15 + 0.17 + t[2] * 0.34, pp[2]); dm.updateMatrix(); tyres.setMatrixAt(n, dm.matrix); });
     tyres.castShadow = !coarse; tyres.frustumCulled = false; fac.add(tyres);
@@ -1168,7 +1240,7 @@ function gridQuads(sLine, pole) {
       for (j = 0; j <= nz; j++) for (i = 0; i <= nx; i++) {
         var vv = j * (nx + 1) + i, vx2 = x0 + i * CELL, vz2 = z0 + j * CELL, base = baseH(e, vx2, vz2), dd = Dd[vv], h = base;
         if (dd < RR) {
-          var ry = LoH[vv] < 1e8 ? Lye[vv] : Tye[vv], shelf = ry - 0.15 - 1.35 * (1 - sst(HALF - 1, HALF + 3, dd)), sl = Math.max(0, dd - (HALF + 16)) * 0.55;
+          var ry = LoH[vv] < 1e8 ? Lye[vv] : Tye[vv], shelf = ry - 0.15 - 1.35 * (1 - sst(HALF - 1, HALF + 3, dd)), sl = Math.max(0, dd - (HALF + 16 - PULL)) * 0.55;
           var tg = base > shelf ? Math.min(base, shelf + sl) : Math.max(base, shelf - sl), w = sst(RR - 40, RR, dd); h = tg * (1 - w) + base * w;
         }
         Hh[vv] = h;
@@ -1441,7 +1513,7 @@ function gridQuads(sLine, pole) {
       var tgt = inp.R - inp.L; D.st += (tgt - D.st) * (1 - Math.exp(-dt * (tgt ? 8 : 12)));
       var om = D.st * Math.min(1.5, 40 / Math.max(Math.abs(vf2), 8)) * Math.min(1, Math.abs(vf2) / 5) * (vf2 < 0 ? -1 : 1); D.a += om * dt;
       D.x += D.vx * dt; D.z += D.vz * dt; k = nearK(D.x, D.z, k); la = latOf(D.x, D.z, k);
-      var dA = D.a - Math.atan2(L.TZ[k], L.TX[k]), reach = Math.abs(Math.cos(dA)) + 2.4 * Math.abs(Math.sin(dA)), lim = HALF + 10.3 - reach;
+      var dA = D.a - Math.atan2(L.TZ[k], L.TX[k]), reach = Math.abs(Math.cos(dA)) + 2.4 * Math.abs(Math.sin(dA)), lim = HALF + 10.3 - PULL - reach;
       if (Math.abs(la) > lim) {
         var sg = la > 0 ? 1 : -1, nx = -L.TZ[k] * sg, nz = L.TX[k] * sg, over = Math.abs(la) - lim; D.x -= nx * over; D.z -= nz * over;
         var vn = D.vx * nx + D.vz * nz;
