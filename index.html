@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!doctype html>
 <html lang="en">
 <head>
@@ -134,6 +135,7 @@ html, body { overscroll-behavior: none; }
 #res .row{display:flex;gap:8px;margin-top:12px}#res button{flex:1;padding:12px;font-size:15px !important;height:auto !important;width:auto !important;border-radius:10px !important}
 </style>
 <canvas id="gl" tabindex="0" aria-label="3D view of the racetrack. Drag to orbit, pinch or scroll to zoom, two fingers or right-drag to pan."></canvas>
+<div id="film" style="position:fixed;inset:0;pointer-events:none;z-index:4;mix-blend-mode:soft-light"></div>
 <div id="ui">
   <div class="hud">
     <h1>Speed Force</h1>
@@ -168,8 +170,8 @@ html, body { overscroll-behavior: none; }
   </div>
 </div>
 <div id="drv" hidden>
-  <div id="tags"></div><div id="tower" hidden></div><div id="cd"></div><div id="res" hidden></div>
-  <div id="spd"><b id="dk">0</b><span>km/h</span><i id="dg">D</i><div id="dbar"><u id="dbu"></u></div><p id="dlap">Cross the start line for lap times</p></div>
+  <div id="tags"></div><canvas id="mm" width="200" height="200" style="position:absolute;top:calc(8px + env(safe-area-inset-top,0px));left:10px;width:112px;height:112px;border-radius:12px;background:rgba(10,14,20,.55);border:1px solid var(--line)"></canvas><div id="tower" hidden></div><div id="cd"></div><div id="res" hidden></div>
+  <div id="spd"><b id="dk">0</b><span>km/h</span><i id="dg">D</i><div id="dbar"><u id="dbu"></u></div><p id="dlap">Cross the start line for lap times</p><label style="display:block;font:600 11px var(--display);letter-spacing:.1em;color:var(--mut);pointer-events:auto">STEER <input id="sens" type="range" min="0.5" max="2.5" step="0.05" value="1.2" style="width:90px;vertical-align:middle;accent-color:var(--accent)"></label></div>
   <button id="fanBtn" aria-label="Menu">&#9776;</button>
   <div id="fan">
     <button data-f="lights" id="fLights">&#128161;<small>Lights</small></button>
@@ -215,7 +217,7 @@ html, body { overscroll-behavior: none; }
 /* ---------- Circuit layout (pure math, no three.js) ---------- */
 var TS = 1.6;                                                  // track scale: 1 = original lap (~5 km), 1.6 = ~8 km
 var ROAD_W = 41, RUN_W = 2.5, RH = ROAD_W / 2, HALF = RH + RUN_W;   // 41 m wide road (was 24: widened halfway to the old fence line), 2.5 m run-off each side
-var PULL = 9.4;                                                    // how far the barriers, fence and stands were dragged in towards the road
+var PULL = -22;                                                    // how far the barriers, fence and stands were dragged in towards the road
 var NLAT = Math.round(HALF * 2) * 2;                                            // columns across the surface (0.5 m apart)
 
 function buildLayout() {
@@ -984,7 +986,7 @@ function gridQuads(sLine, pole) {
     // stars, a galactic-plane Milky Way with dust lanes, and a moon.
     var SKY_FS = [
       'precision highp float;', 'varying vec3 vDir;',
-      'uniform vec3 uSun, uTrans, uLDir, uLCol, uAmb, uMoon;', 'uniform float uI, uCover, uStars, uMoonOn, uTime;',
+      'uniform vec3 uSun, uTrans, uLDir, uLCol, uAmb, uMoon;', 'uniform float uI, uCover, uStars, uMoonOn, uTime, uRain;',
       'const float RE = 6360.0, RA = 6420.0, HR = 8.0, HM = 1.2, MSC = 0.075, BM = 0.021, G = 0.76, PI = 3.14159265;',
       'const vec3 BR = vec3(0.0058, 0.0135, 0.0331), BO = vec3(0.00065, 0.001881, 0.000085);',
       'float od(float h) { return max(0.0, 1.0 - abs(h - 25.0) / 15.0); }',
@@ -1040,6 +1042,7 @@ function gridQuads(sLine, pole) {
       '  float ang = acos(clamp(cosS, -1.0, 1.0)), disc = 0.012;',
       '  float sd = smoothstep(disc, disc * 0.7, ang) * step(0.0, h) * (0.78 + 0.22 * sqrt(max(0.0, 1.0 - (ang / disc) * (ang / disc))));',
       '  col += uTrans * uI * (0.55 * sd + 0.02 * pow(max(cosS, 0.0), 64.0)) * (1.0 - dens * 0.92);',
+      '  if (uRain > 0.0 && h > 0.0 && uLDir.y > 0.0) { float ar = acos(clamp(dot(d, -uLDir), -1.0, 1.0)), tq = clamp((ar - 0.70) / 0.066, 0.0, 1.0); float env = smoothstep(0.69, 0.715, ar) * smoothstep(0.775, 0.75, ar); vec3 spec = vec3(smoothstep(0.45, 1.0, tq), 1.0 - abs(tq - 0.5) * 2.0, smoothstep(0.55, 0.0, tq)); col += spec * env * uRain * 0.22 * smoothstep(0.0, 0.1, h) * (1.0 - dens * 0.6); }',
       '  float l = dot(col, vec3(0.2126, 0.7152, 0.0722)); col = max(vec3(0.0), l + (col - l) * 1.6); col = 1.0 - exp(-0.9 * col);',
       '  if (uStars > 0.01 && h > 0.0) {',
       '    float vis = uStars * smoothstep(0.0, 0.12, h) * (1.0 - dens * 0.95);',
@@ -1090,18 +1093,19 @@ function gridQuads(sLine, pole) {
 
     var sU = {};
     ['uSun', 'uTrans', 'uLDir', 'uLCol', 'uAmb', 'uMoon'].forEach(function (k) { sU[k] = { value: new THREE.Vector3() }; });
-    ['uI', 'uCover', 'uStars', 'uMoonOn', 'uTime'].forEach(function (k) { sU[k] = { value: 0 }; });
+    ['uI', 'uCover', 'uStars', 'uMoonOn', 'uTime', 'uRain'].forEach(function (k) { sU[k] = { value: 0 }; });
     var skyMat = new THREE.ShaderMaterial({ uniforms: sU, vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthTest: false, depthWrite: false });
     var sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), skyMat); sky.frustumCulled = false; sky.renderOrder = -1000; scene.add(sky);
 
     // sun = colour/strength of the real scene light, dir = where the main light comes from, I = camera exposure (a low sun is exposed
     // down, as a camera would), sky = true sun direction when it differs from the light (night: sun is below the horizon, moon lights the scene)
     var PRESETS = [
-      { name: 'Day', sun: 0xfff2de, sunI: 2.4, dir: [-0.55, 0.55, 0.62], hs: 0xbfd4e8, hg: 0x3a3f45, hI: 0.55, fI: 0.3, I: 12, cover: 0.5, stars: 0 },
-      { name: 'Golden hour', sun: 0xffb26b, sunI: 2.3, dir: [0.85, 0.16, -0.3], hs: 0x9a93b3, hg: 0x2a2220, hI: 0.45, fI: 0.25, I: 8, cover: 0.5, stars: 0 },
-      { name: 'Fiery clouds', sun: 0xff9a55, sunI: 2.0, dir: [-0.6, 0.09, 0.75], hs: 0x5a6aa0, hg: 0x2a1c20, hI: 0.45, fI: 0.25, I: 6, cover: 0.82, stars: 0 },
-      { name: 'City dusk', sun: 0xff7f60, sunI: 1.6, dir: [0.5, 0.05, 0.85], hs: 0x7a5a90, hg: 0x1f1620, hI: 0.45, fI: 0.22, I: 5, cover: 0.72, stars: 0.12 },
-      { name: 'Milky Way', sun: 0x8fb1ff, sunI: 0.55, dir: [-0.4, 0.62, 0.5], sky: [0.3, -0.4, 0.86], moon: true, hs: 0x2a3b55, hg: 0x07090c, hI: 0.4, fI: 0.1, I: 12, cover: 0.22, stars: 1 }
+      { name: 'Summer holiday', sun: 0xfff0d6, sunI: 2.3, dir: [-0.55, 0.5, 0.62], hs: 0xc4d6e6, hg: 0x3a3f45, hI: 0.55, fI: 0.3, I: 11, cover: 0.4, stars: 0, film: 'rgba(255,214,150,.5)' },
+      { name: 'After the rain', sun: 0xffe2b8, sunI: 2.0, dir: [-0.7, 0.3, 0.65], hs: 0x9fb6cc, hg: 0x2b3034, hI: 0.5, fI: 0.25, I: 9, cover: 0.72, stars: 0, rain: 1, film: 'rgba(170,205,230,.45)' },
+      { name: 'Golden hour', sun: 0xffb26b, sunI: 2.3, dir: [0.85, 0.16, -0.3], hs: 0x9a93b3, hg: 0x2a2220, hI: 0.45, fI: 0.25, I: 8, cover: 0.5, stars: 0, film: 'rgba(255,170,90,.55)' },
+      { name: 'Thunderhead sunset', sun: 0xff9a55, sunI: 2.0, dir: [-0.6, 0.09, 0.75], hs: 0x5a6aa0, hg: 0x2a1c20, hI: 0.45, fI: 0.25, I: 6, cover: 0.88, stars: 0, film: 'rgba(255,110,70,.5)' },
+      { name: 'Blue hour', sun: 0xff7f60, sunI: 1.6, dir: [0.5, 0.05, 0.85], hs: 0x7a5a90, hg: 0x1f1620, hI: 0.45, fI: 0.22, I: 5, cover: 0.6, stars: 0.35, film: 'rgba(110,130,200,.5)' },
+      { name: 'Harvest moon', sun: 0x8fb1ff, sunI: 0.55, dir: [-0.4, 0.62, 0.5], sky: [0.3, -0.4, 0.86], moon: true, hs: 0x2a3b55, hg: 0x07090c, hI: 0.4, fI: 0.1, I: 12, cover: 0.22, stars: 1, film: 'rgba(40,60,120,.45)' }
     ];
     var pIdx = 0;
     function applyPreset(n) {
@@ -1120,7 +1124,7 @@ function gridQuads(sLine, pole) {
       if (p.moon) { sU.uLCol.value.set(0.2, 0.26, 0.42); sU.uAmb.value.set(0.012, 0.02, 0.04); }
       else { sU.uLCol.value.set(T[0] * 1.7 * ex, T[1] * 1.7 * ex, T[2] * 1.7 * ex); sU.uAmb.value.set(za[0] * 0.9 + 0.01, za[1] * 0.9 + 0.01, za[2] * 0.9 + 0.015); }
       sU.uCover.value = p.cover; sU.uStars.value = p.stars;
-      $('lightLabel').textContent = p.name;
+      $('lightLabel').textContent = p.name; sU.uRain.value = p.rain || 0; $('film').style.background = 'radial-gradient(ellipse at 50% 45%, transparent 50%, rgba(0,0,0,.6) 100%), linear-gradient(' + p.film + ',' + p.film + ')';
     }
 
     // ---------- Environments: terrain that follows the road, trackside safety kit, and switchable settings ----------
@@ -1177,9 +1181,9 @@ function gridQuads(sLine, pole) {
           '  c *= (0.78 + 0.44 * m2) * (0.88 + 0.24 * m3) * (0.9 + 0.2 * m4);',
           '  c = mix(c, uR, smoothstep(uRockY, uRockY + 90.0, hy));',
           '  if (uSea > 0.5) c = mix(uS * (0.9 + 0.2 * m3), c, smoothstep(uSeaY - uG0 + 1.5, uSeaY - uG0 + 9.0, hy));',
-          '  float gr = smoothstep(uHalf + 0.3, uHalf + 0.8, d) * (1.0 - smoothstep(uHalf + 1.4, uHalf + 2.2, d));',
+          '  float gr = smoothstep(uHalf + 0.3, uHalf + 0.8, d) * (1.0 - smoothstep(uHalf + 27.0, uHalf + 30.0, d));',
           '  c = mix(c, uGrav * (0.7 + 0.5 * m4) * (0.9 + 0.2 * m3), gr);',
-          '  float mw = smoothstep(uHalf + 1.4, uHalf + 2.2, d) * (1.0 - smoothstep(uHalf + 14.0, uHalf + 24.0, d));',
+          '  float mw = smoothstep(uHalf + 29.0, uHalf + 32.0, d) * (1.0 - smoothstep(uHalf + 44.0, uHalf + 70.0, d));',
           '  return mix(c, uMown * (0.85 + 0.3 * m2) * (0.92 + 0.16 * m4), mw * uMownAmt);',
           '}' ].join('\n')).replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = terrainCol(vWP, vInfo);');
       };
@@ -1246,7 +1250,7 @@ function gridQuads(sLine, pole) {
     for (i0 = 0; i0 < nCol; i0++) [0, R * 1.2 + 1].forEach(function (o) { var pp = L.place(stS0 + i0 * 24, HALF + 15 - PULL + o, 0); dm.position.set(pp[0], L.place(stS0 + i0 * 24, HALF, 0)[1] - 0.5, pp[2]); dm.updateMatrix(); cols.setMatrixAt(ci++, dm.matrix); });
     cols.castShadow = !coarse; cols.frustumCulled = false; fac.add(cols);
     strip(L.len - 380, L.len - 60, 6, [[0, -3, 0], [0, 7, 1], [11, 7.8, 1], [11, -3, 0]], HALF + 15 - PULL, -1, new THREE.MeshStandardMaterial({ map: pitTex, roughness: 0.6, metalness: 0.15, side: THREE.DoubleSide }), 40);
-    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + 0.1 + r * 0.7), h]); });
+    var twp = []; corners.forEach(function (cn) { if (cn.rad > 90 * TS) return; for (var s = cn.entry; s < cn.exit; s += 0.72) for (var r = 0; r < 2; r++) for (var h = 0; h < 3; h++) twp.push([s + r * 0.36, cn.out * (HALF + 9.0 - PULL + r * 0.7), h]); });
     var tyres = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.33, 0.33, 0.32, 10), new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.95 }), Math.max(1, twp.length));
     twp.forEach(function (t, n) { var pp = L.place(t[0], t[1], 0), sg = t[1] > 0 ? 1 : -1; dm.position.set(pp[0], L.place(t[0], sg * HALF, 0)[1] - 0.15 + 0.17 + t[2] * 0.34, pp[2]); dm.updateMatrix(); tyres.setMatrixAt(n, dm.matrix); });
     tyres.castShadow = !coarse; tyres.frustumCulled = false; fac.add(tyres);
@@ -1304,10 +1308,10 @@ function gridQuads(sLine, pole) {
       var palm = mergeG([[new THREE.CylinderGeometry(0.22, 0.38, 9, 6).translate(0, 4.5, 0), 0x8a7050]].concat([0, 1, 2, 3, 4, 5, 6].map(function (k) { return [new THREE.BoxGeometry(0.5, 0.08, 5).translate(0, 0, 2.5).rotateX(0.5).rotateY(k * 0.9).translate(0, 9, 0), 0x3f7a3a]; })));
       var cactus = mergeG([[new THREE.CylinderGeometry(0.4, 0.45, 4.5, 7).translate(0, 2.25, 0), 0x4f7a45], [new THREE.CylinderGeometry(0.28, 0.3, 2, 6).translate(1, 3, 0), 0x4f7a45], [new THREE.CylinderGeometry(0.28, 0.3, 1.6, 6).translate(-0.9, 2.4, 0), 0x4f7a45]]);
       var rock = mergeG([[new THREE.DodecahedronGeometry(1.4, 0), e.mesa ? 0x9a6b45 : 0x7c7971]]);
-      var dens = function (f, th) { return function (x, z, q) { return land(x, z, q) && q.d > HALF + 36 && fb(x * f, z * f) > th; }; };
+      var dens = function (f, th) { return function (x, z, q) { return land(x, z, q) && q.d > HALF + 62 && fb(x * f, z * f) > th; }; };
       if (e.trees === 'forest') { scatter(pine, coarse ? 1800 : 3200, dens(1 / 380, 0.5), [0.9, 1.7]); scatter(oak, coarse ? 900 : 1600, dens(1 / 520, 0.46), [0.9, 1.5]); }
       if (e.trees === 'cactus') scatter(cactus, 700, dens(1 / 300, 0.45), [0.8, 1.6]);
-      if (e.trees !== 'palm' || true) scatter(rock, e.mesa ? 1400 : 380, function (x, z, q) { return land(x, z, q) && q.d > HALF + 34 && Math.random() < 0.5; }, e.mesa ? [0.8, 3.2] : [0.6, 2.2], new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
+      if (e.trees !== 'palm' || true) scatter(rock, e.mesa ? 1400 : 380, function (x, z, q) { return land(x, z, q) && q.d > HALF + 60 && Math.random() < 0.5; }, e.mesa ? [0.8, 3.2] : [0.6, 2.2], new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
 
       // distant ridges, hazed by the sky's fog
       function ring(rad, hMul, col, seed) {
@@ -1450,8 +1454,26 @@ function gridQuads(sLine, pole) {
       renderer.render(scene, camera);
       if (first) { first = false; finishBoot(); }
     }
+    var mmC = $('mm'), mmG = mmC.getContext('2d'), mmB = document.createElement('canvas'), mmS = 1, mmX = 0, mmY = 0;
+    mmB.width = mmB.height = 200;
+    (function () {
+      var g = mmB.getContext('2d'), w = maxX - minX, h = maxZ - minZ; mmS = 176 / Math.max(w, h); mmX = 12 + (176 - w * mmS) / 2; mmY = 12 + (176 - h * mmS) / 2;
+      g.lineJoin = 'round'; g.lineCap = 'round';
+      [['rgba(0,0,0,.8)', 9], ['#c9d1d8', 5]].forEach(function (st) {
+        g.strokeStyle = st[0]; g.lineWidth = st[1]; g.beginPath();
+        for (var i = 0; i <= L.M; i += 3) { var k = i % L.M, px = mmX + (L.X[k] - minX) * mmS, py = mmY + (L.Z[k] - minZ) * mmS; if (i) g.lineTo(px, py); else g.moveTo(px, py); }
+        g.closePath(); g.stroke();
+      });
+      var k0 = Math.round(sLine / L.ds) % L.M; g.fillStyle = '#ff7a2f'; g.beginPath(); g.arc(mmX + (L.X[k0] - minX) * mmS, mmY + (L.Z[k0] - minZ) * mmS, 4.5, 0, 6.3); g.fill();
+    })();
+    function mmDraw() {
+      mmG.clearRect(0, 0, 200, 200); mmG.drawImage(mmB, 0, 0);
+      if (RC) RC.ai.forEach(function (a) { mmG.fillStyle = '#' + ('000000' + a.color.toString(16)).slice(-6); mmG.beginPath(); mmG.arc(mmX + (a.x - minX) * mmS, mmY + (a.z - minZ) * mmS, 4, 0, 6.3); mmG.fill(); });
+      mmG.save(); mmG.translate(mmX + (DR.x - minX) * mmS, mmY + (DR.z - minZ) * mmS); mmG.rotate(DR.a); mmG.fillStyle = '#fff'; mmG.strokeStyle = '#000'; mmG.lineWidth = 2;
+      mmG.beginPath(); mmG.moveTo(9, 0); mmG.lineTo(-6, 6); mmG.lineTo(-3, 0); mmG.lineTo(-6, -6); mmG.closePath(); mmG.stroke(); mmG.fill(); mmG.restore();
+    }
     // ---------- Test drive: procedural car, physics, chase camera, touch controls ----------
-    var drive = false, DR = { x: 0, z: 0, a: 0, vx: 0, vz: 0, k: 0, st: 0, y: 0, lights: false, cam: 0, snd: true, lapT: 0, best: 0, pk: 0, shake: 0, pitch: 0, roll: 0 };
+    var drive = false, DR = { sens: 1.2, x: 0, z: 0, a: 0, vx: 0, vz: 0, k: 0, st: 0, y: 0, lights: false, cam: 0, snd: true, lapT: 0, best: 0, pk: 0, shake: 0, pitch: 0, roll: 0 };
     var inp = { L: 0, R: 0, G: 0, B: 0, N: 0 }, car = new THREE.Group(), spins = [], pivots = [], tails = [], lenses = [], beams = [], audio = null;
     var ENV = (function () {
       var ec = document.createElement('canvas'); ec.width = 512; ec.height = 256; var eg = ec.getContext('2d'), gr = eg.createLinearGradient(0, 0, 0, 256);
@@ -1474,12 +1496,12 @@ function gridQuads(sLine, pole) {
       { name: 'Apex GT', n: 2.8, wing: [-2.25, 1.0, 1.75, 0.42], fin: 0,
         body: [[2.45, .2, .22, .3], [2.3, .55, .18, .36], [1.9, .78, .17, .46], [1.45, .86, .17, .56], [.9, .88, .17, .64], [.3, .9, .17, .74], [-.4, .92, .17, .8], [-1, .94, .17, .84], [-1.4, .9, .17, .84], [-1.9, .78, .2, .8], [-2.3, .6, .26, .7], [-2.42, .4, .3, .62]],
         can: [[.75, .3, .74, .78], [.3, .62, .78, 1.04], [-.4, .68, .84, 1.14], [-1, .64, .86, 1.1], [-1.55, .5, .86, .96], [-1.85, .3, .86, .9]] },
-      { name: 'Volt R', n: 2.5, wing: [-2.3, 1.08, 1.5, 0.3], fin: 0,
-        body: [[2.4, .25, .22, .36], [2.2, .6, .18, .46], [1.8, .8, .17, .58], [1.45, .86, .17, .68], [.8, .9, .17, .78], [0, .92, .17, .86], [-.8, .94, .17, .9], [-1.4, .92, .17, .9], [-1.9, .82, .2, .86], [-2.3, .64, .24, .78], [-2.42, .45, .28, .7]],
-        can: [[1, .4, .82, .88], [.45, .68, .86, 1.12], [-.3, .72, .9, 1.22], [-1.1, .7, .9, 1.2], [-1.7, .56, .9, 1.04], [-2, .36, .9, .94]] },
-      { name: 'Phantom', n: 3.2, wing: [-2.3, 1.05, 1.9, 0.5], fin: 1,
-        body: [[2.5, .3, .14, .22], [2.3, .7, .12, .3], [1.9, .84, .12, .38], [1.45, .86, .12, .46], [.8, .88, .12, .54], [0, .9, .12, .6], [-.8, .9, .12, .66], [-1.4, .88, .12, .66], [-1.9, .76, .14, .62], [-2.3, .56, .18, .56], [-2.42, .4, .22, .5]],
-        can: [[.5, .22, .56, .6], [.1, .42, .58, .84], [-.5, .46, .62, .94], [-1.1, .4, .64, .86], [-1.6, .24, .64, .74]] }
+      { name: 'Volt R', n: 2.2, wing: [-2.35, 1.22, 1.3, 0.22], fin: 0,
+        body: [[2.2, .3, .25, .45], [2.0, .62, .2, .55], [1.6, .82, .2, .7], [1.2, .88, .2, .82], [.6, .9, .2, .9], [-.2, .92, .2, .95], [-1, .92, .2, .98], [-1.7, .88, .22, .95], [-2.15, .7, .26, .88], [-2.3, .5, .3, .8]],
+        can: [[.9, .4, .9, 1.0], [.4, .72, .95, 1.4], [-.3, .78, .98, 1.58], [-1, .74, .98, 1.5], [-1.6, .6, .98, 1.2], [-1.9, .4, .98, 1.05]] },
+      { name: 'Phantom', n: 3.4, wing: [-2.45, 1.35, 1.95, 0.55], fin: 1,
+        body: [[2.7, .1, .14, .2], [2.4, .35, .12, .26], [1.9, .45, .12, .34], [1.3, .52, .12, .42], [.6, .55, .12, .5], [-.2, .58, .12, .56], [-1, .6, .12, .62], [-1.6, .5, .14, .6], [-2.2, .36, .18, .52], [-2.5, .22, .22, .44]],
+        can: [[.5, .18, .5, .56], [.1, .34, .52, .8], [-.5, .38, .56, .9], [-1.1, .3, .58, .82], [-1.6, .16, .58, .7]] }
     ];
     var SWATCH = [0xff6a00, 0xd8452c, 0x2563c9, 0xe9b30c, 0x16a394, 0x7d3fc4, 0xe4e6e8, 0x2f9a45, 0xcf4a8c, 0x1a1a1d], GEO = [];
     function loft(keys, n) {
@@ -1571,11 +1593,11 @@ function gridQuads(sLine, pole) {
       var la = latOf(D.x, D.z, k), off = Math.abs(la) > HALF - 0.5, vmax = (inp.N ? 138 : 112) * (off ? 0.4 : 1), acc = 0;
       if (inp.G) acc += (inp.N ? 32 : 20) * Math.max(0, 1 - Math.pow(Math.max(vf, 0) / vmax, 1.6));
       if (inp.B) { if (vf > 1) acc -= 44; else if (vf > -14) acc -= 10; }
-      acc -= 0.0004 * vf * Math.abs(vf) + (vf > 0 ? 0.35 : -0.35) * (Math.abs(vf) > 0.3 ? 1 : 0) + (off ? 0.7 * vf : 0);
+      acc -= 0.0004 * vf * Math.abs(vf) + (vf > 0 ? 0.35 : -0.35) * (Math.abs(vf) > 0.3 ? 1 : 0) + (off ? 1.3 * vf : 0);
       var vf2 = vf + acc * dt; if (!inp.G && !inp.B && Math.abs(vf2) < 0.3) vf2 = 0;
-      var grip = Math.exp(-dt * (off ? 2.2 : 7.5)); D.vx = fx * vf2 + lx * grip; D.vz = fz * vf2 + lz * grip;
-      var tgt = inp.R - inp.L; D.st += (tgt - D.st) * (1 - Math.exp(-dt * (tgt ? 8 : 12)));
-      var om = D.st * Math.min(1.5, 40 / Math.max(Math.abs(vf2), 8)) * Math.min(1, Math.abs(vf2) / 5) * (vf2 < 0 ? -1 : 1); D.a += om * dt;
+      var grip = Math.exp(-dt * (off ? 2.5 : 11)); D.vx = fx * vf2 + lx * grip; D.vz = fz * vf2 + lz * grip;
+      var tgt = inp.R - inp.L; D.st += (tgt - D.st) * (1 - Math.exp(-dt * (tgt ? 14 : 16)));
+      var om = D.st * D.sens * Math.min(2.4, 95 / Math.max(Math.abs(vf2), 14)) * Math.min(1, Math.abs(vf2) / 4) * (vf2 < 0 ? -1 : 1); D.a += om * dt;
       D.x += D.vx * dt; D.z += D.vz * dt; k = nearK(D.x, D.z, k); la = latOf(D.x, D.z, k);
       var dA = D.a - Math.atan2(L.TZ[k], L.TX[k]), reach = Math.abs(Math.cos(dA)) + 2.4 * Math.abs(Math.sin(dA)), lim = HALF + 10.3 - PULL - reach;
       if (Math.abs(la) > lim) {
@@ -1605,6 +1627,7 @@ function gridQuads(sLine, pole) {
       $('dk').textContent = Math.round(kmh); $('dg').textContent = vf < -0.5 ? 'R' : 'D'; $('dbu').style.width = Math.min(100, sp / 138 * 100) + '%'; $('dbar').classList.toggle('nos', !!inp.N);
       if (audio) { var g = Math.min(6, 1 + Math.floor(sp / 22)), fr = (sp - (g - 1) * 22) / 22; audio.o.frequency.value = 55 + fr * 120 + g * 9; audio.o2.frequency.value = (55 + fr * 120 + g * 9) * 0.5; audio.g.gain.value = DR.snd ? 0.03 + (inp.G ? 0.04 : 0) : 0; audio.f.frequency.value = 400 + fr * 900; }
       if (sv) { inp.G = sv[0]; inp.B = sv[1]; inp.N = sv[2]; }
+      mmDraw();
       if (RC) raceStep(dt);
     }
     // controls: pointer-held pedals (multi-touch), pop-out menu, keyboard
@@ -1626,7 +1649,7 @@ function gridQuads(sLine, pole) {
       exit: stopDrive
     };
     fitems.forEach(function (b) { b.addEventListener('click', function () { fAct[b.getAttribute('data-f')](); if (b.getAttribute('data-f') !== 'lights' && b.getAttribute('data-f') !== 'cam' && b.getAttribute('data-f') !== 'sound') fan.classList.remove('open'); }); });
-    $('fSnd').classList.add('on'); setPlayerCar(0, SWATCH[0]);
+    $('sens').addEventListener('input', function (e) { DR.sens = +e.target.value; }); $('fSnd').classList.add('on'); setPlayerCar(0, SWATCH[0]);
     var KM = { ArrowLeft: 'L', a: 'L', ArrowRight: 'R', d: 'R', ArrowUp: 'G', w: 'G', ArrowDown: 'B', s: 'B', ' ': 'B', Shift: 'N' };
     window.addEventListener('keydown', function (e) { if (!drive) return; var kk = KM[e.key]; if (kk) { inp[kk] = 1; e.preventDefault(); } else if (e.key === 'l') fAct.lights(); else if (e.key === 'c') fAct.cam(); });
     window.addEventListener('keyup', function (e) { var kk = KM[e.key]; if (kk) inp[kk] = 0; });
@@ -1661,7 +1684,7 @@ function gridQuads(sLine, pole) {
     function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
     function endCareer() {
       if (RC) RC.ai.forEach(function (a) { scene.remove(a.car.g); });
-      RC = null; $('tags').innerHTML = ''; $('tower').hidden = true; $('cd').textContent = ''; $('res').hidden = true;
+      RC = null; $('mm').style.left = '10px'; $('tags').innerHTML = ''; $('tower').hidden = true; $('cd').textContent = ''; $('res').hidden = true;
     }
     function startCareer() {
       endCareer(); startDrive();
@@ -1677,7 +1700,7 @@ function gridQuads(sLine, pole) {
         a.tag = document.createElement('div'); a.tag.className = 'tag'; a.tag.style.setProperty('--c', '#' + ('000000' + d.c.toString(16)).slice(-6)); $('tags').appendChild(a.tag);
         C.ai.push(a);
       });
-      C.all = [C.P].concat(C.ai); C.ai.forEach(function (a) { poseAI(a, 0); }); $('tower').hidden = false;
+      $('mm').style.left = '164px'; C.all = [C.P].concat(C.ai); C.ai.forEach(function (a) { poseAI(a, 0); }); $('tower').hidden = false;
     }
     function poseAI(a, dt) {
       var p = L.place(a.s, a.lat, 0), p2 = L.place(a.s + 3, a.lat, 0), pl = L.place(a.s, a.lat - 0.8, 0), pr = L.place(a.s, a.lat + 0.8, 0);
@@ -1770,3 +1793,5 @@ function gridQuads(sLine, pole) {
 
 </body>
 </html>
+
+</body></html>
